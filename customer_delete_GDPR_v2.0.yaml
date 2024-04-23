@@ -1,0 +1,170 @@
+$integration: http://ibm.com/appconnect/integration/v2/integrationFile
+integration:
+  type: trigger-action
+  trigger-interfaces:
+    trigger-interface-1:
+      type: event-trigger
+      connector-type: postgres
+      triggers:
+        CREATEDORUPDATED_POLLER:
+          assembly:
+            $ref: '#/integration/assemblies/assembly-1'
+          input-context:
+            data: vdb_eai_cust_del_req
+          options:
+            subscription:
+              createdField: time_stamp
+              updatedField: time_stamp
+              timeFormat: YYYY-MM-DDTHH:mm:ssZ
+              timeZone: UTC
+              pollingInterval: 1
+      account-name: Account 1
+  action-interfaces:
+    action-interface-1:
+      type: api-action
+      business-object: message
+      connector-type: slack
+      account-name: Account 1
+      actions:
+        CREATE: {}
+    action-interface-3:
+      type: api-action
+      business-object: message
+      connector-type: kafka
+      account-name: Account 1
+      actions:
+        CREATE: {}
+    action-interface-4:
+      type: api-action
+      business-object: vdb_eai_cust_del_req
+      connector-type: postgres
+      account-name: Account 1
+      actions:
+        DELETEALL: {}
+  assemblies:
+    assembly-1:
+      assembly:
+        execute:
+          - set-variable:
+              map:
+                $map: http://ibm.com/appconnect/map/v1
+                customSchemas:
+                  properties.`variable`:
+                    type: object
+                    properties:
+                      EventID:
+                        type: number
+                      AttributeType:
+                        type: string
+                      CustCode:
+                        type: string
+                      CustomerID:
+                        type: number
+                      CSLevel:
+                        type: string
+                      CSFlagPrivate:
+                        type: string
+                      CSIVACode_FiscalCode:
+                        type: string
+                      CSCancelDate:
+                        type: string
+                        format: date-time
+                      AttributeID:
+                        type: string
+                      RetryCount:
+                        type: number
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: flowDetails
+                    $ref: '#/flowDetails'
+                mappings:
+                  - variable:
+                      mappings:
+                        - AttributeID:
+                            template: '{{$Trigger.attribute_type}}'
+                        - AttributeType:
+                            template: '{{$Trigger.attribute_type}}'
+                        - CSCancelDate:
+                            template: '{{$Trigger.cs_cancel_date}}'
+                        - CSFlagPrivate:
+                            template: '{{$Trigger.cs_flag_private}}'
+                        - CSIVACode_FiscalCode:
+                            template: '{{$Trigger.cs_ivacode_fiscalcode}}'
+                        - CSLevel:
+                            template: '{{$Trigger.cslevel}}'
+                        - CustCode:
+                            template: '{{$Trigger.custcode}}'
+                        - CustomerID:
+                            expression: '$Trigger.customer_id '
+                        - EventID:
+                            expression: '$Trigger.event_id '
+                        - RetryCount:
+                            expression: '0'
+              name: Set variable
+          - create-action:
+              name: Slack Send message
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-1'
+              map:
+                mappings:
+                  - OBJECT_ID:
+                      template: U05D46JGXL7
+                  - OBJECT_NAME:
+                      template: user
+                  - text:
+                      template: ' {{$Setvariable.variable}} pubblicato'
+                $map: http://ibm.com/appconnect/map/v1
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: Setvariable
+                    $ref: '#/node-output/Set variable/response/payload'
+                  - variable: flowDetails
+                    $ref: '#/flowDetails'
+          - create-action:
+              name: Kafka Send message
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-3'
+              map:
+                mappings:
+                  - Payload:
+                      template: '{{$Setvariable.variable}}'
+                  - Topic:
+                      template: DELETE_REQUEST
+                  - key:
+                      template: '{{$Trigger.event_id}}'
+                $map: http://ibm.com/appconnect/map/v1
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: Setvariable
+                    $ref: '#/node-output/Set variable/response/payload'
+                  - variable: SlackSendmessage
+                    $ref: '#/node-output/Slack Send message/response/payload'
+                  - variable: flowDetails
+                    $ref: '#/flowDetails'
+          - delete-action:
+              allow-empty-output: true
+              name: PostgreSQL Delete eai_cust_del_req records
+              target:
+                $ref: '#/integration/action-interfaces/action-interface-4'
+              filter:
+                where:
+                  and:
+                    - event_id: '{{$Trigger.event_id}}'
+                    - time_stamp: '{{$Trigger.time_stamp}}'
+                input:
+                  - variable: Trigger
+                    $ref: '#/trigger/payload'
+                  - variable: Setvariable
+                    $ref: '#/node-output/Set variable/response/payload'
+                  - variable: SlackSendmessage
+                    $ref: '#/node-output/Slack Send message/response/payload'
+                  - variable: KafkaSendmessage
+                    $ref: '#/node-output/Kafka Send message/response/payload'
+                  - variable: flowDetails
+                    $ref: '#/flowDetails'
+                limit: 10
+  name: customer_delete_GDPR
+models: {}
